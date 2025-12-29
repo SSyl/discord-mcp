@@ -14,3 +14,7 @@ wheels/
 
 # Logs
 *.log
+
+# Dot directories (except .github)
+.*/
+!.github/

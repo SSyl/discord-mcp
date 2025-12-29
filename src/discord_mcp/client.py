@@ -513,3 +513,224 @@ async def send_message(
     await asyncio.sleep(1)
 
     return state, f"sent-{int(datetime.now().timestamp())}"
+
+
+async def search_messages(
+    state: ClientState,
+    server_id: str,
+    query: str,
+    in_channels: list[str] | None = None,
+    from_users: list[str] | None = None,
+    mentions_users: list[str] | None = None,
+    has_filters: list[str] | None = None,
+    before: str | None = None,
+    after: str | None = None,
+    during: str | None = None,
+    author_type: str | None = None,
+    pinned: bool | None = None,
+    limit: int = 25,
+) -> tuple[ClientState, list[DiscordMessage]]:
+    """Search for messages using Discord's search UI via DOM scraping.
+
+    Args:
+        state: Client state with browser session
+        server_id: Discord guild/server ID
+        query: Search text content to find
+        in_channels: Channel names to search in (e.g., ["general", "memes"])
+        from_users: Usernames to filter by author
+        mentions_users: Usernames to filter by mentions
+        has_filters: Content type filters (image, video, link, file, embed)
+        before: Date filter YYYY-MM-DD
+        after: Date filter YYYY-MM-DD
+        during: Date filter YYYY-MM-DD (messages on this specific date)
+        author_type: Filter by author type (user, bot, webhook)
+        pinned: If True, only search pinned messages
+        limit: Maximum number of results to return
+    """
+    state = await _login(state)
+    if not state.page:
+        raise RuntimeError("Browser page not initialized")
+
+    # Build search query with filters
+    parts = [query] if query else []
+    if in_channels:
+        for channel in in_channels:
+            parts.append(f"in: {channel}")
+    if from_users:
+        for user in from_users:
+            parts.append(f"from: {user}")
+    if mentions_users:
+        for user in mentions_users:
+            parts.append(f"mentions: {user}")
+    if has_filters:
+        for has_type in has_filters:
+            parts.append(f"has: {has_type}")
+    if before:
+        parts.append(f"before: {before}")
+    if after:
+        parts.append(f"after: {after}")
+    if during:
+        parts.append(f"during: {during}")
+    if author_type:
+        parts.append(f"authorType: {author_type}")
+    if pinned:
+        parts.append("pinned: true")
+
+    full_query = " ".join(parts)
+    logger.debug(f"Searching for '{full_query}' in server {server_id}")
+
+    # Navigate to the server
+    await state.page.goto(
+        f"https://discord.com/channels/{server_id}",
+        wait_until="domcontentloaded",
+    )
+    await state.page.wait_for_timeout(2000)
+
+    # Click the search box
+    search_box = await state.page.query_selector('[role="combobox"]')
+    if not search_box:
+        raise RuntimeError("Could not find search box")
+    await search_box.click()
+    await state.page.wait_for_timeout(500)
+
+    # Type the search query
+    await state.page.keyboard.type(full_query, delay=50)
+    await state.page.wait_for_timeout(500)
+
+    # Submit search
+    await state.page.keyboard.press("Enter")
+
+    # Wait for results to load - use class-based selector
+    try:
+        await state.page.wait_for_selector(
+            '[class*="searchResult"]', state="visible", timeout=10000
+        )
+    except Exception:
+        logger.debug("No search results found or timeout waiting for results")
+        return state, []
+
+    await state.page.wait_for_timeout(1000)
+
+    # Extract search results via JavaScript
+    messages = []
+    seen_content = set()
+    scroll_attempts = 0
+    max_scrolls = 5
+
+    while len(messages) < limit and scroll_attempts < max_scrolls:
+        results_data = await state.page.evaluate(
+            """
+            () => {
+                const results = [];
+                const resultElements = document.querySelectorAll('[class*="searchResult"]');
+
+                resultElements.forEach((el, index) => {
+                    // Look for username
+                    const usernameEl = el.querySelector('[class*="username"], [class*="author"]');
+                    const author = usernameEl?.textContent?.trim() || 'Unknown';
+
+                    // Look for timestamp
+                    const timeEl = el.querySelector('time, [class*="timestamp"]');
+                    const timestamp = timeEl?.getAttribute('datetime') ||
+                                     timeEl?.textContent?.trim() || '';
+
+                    // Look for message content - try specific selectors first
+                    const contentEl = el.querySelector('[class*="messageContent"], [class*="markup"]');
+                    let content = '';
+
+                    if (contentEl) {
+                        content = contentEl.textContent?.trim() || '';
+                    } else {
+                        // Fallback: get full text and clean it up
+                        let text = el.textContent || '';
+
+                        // Remove author name (may appear multiple times)
+                        text = text.split(author).join('');
+
+                        // Remove common UI elements
+                        text = text.replace(/Jump/g, '');
+                        text = text.replace(/\\d{1,2}\\/\\d{1,2}\\/\\d{2,4},?\\s*\\d{1,2}:\\d{2}\\s*(AM|PM)?/gi, '');
+                        text = text.replace(/(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\\s*(January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{1,2},?\\s*\\d{4}\\s+at\\s+\\d{1,2}:\\d{2}\\s*(AM|PM)?/gi, '');
+
+                        // Remove em-dash separators
+                        text = text.replace(/—/g, ' ');
+
+                        content = text.trim();
+                    }
+
+                    // Get channel info if available
+                    const channelEl = el.querySelector('[class*="channel"]');
+                    const channel = channelEl?.textContent?.trim() || '';
+
+                    if (content) {
+                        results.push({
+                            author: author,
+                            content: content.substring(0, 500),
+                            timestamp: timestamp,
+                            channel: channel,
+                            index: index
+                        });
+                    }
+                });
+
+                return results;
+            }
+            """
+        )
+
+        for result in results_data:
+            if len(messages) >= limit:
+                break
+
+            # Deduplicate by content
+            content_key = f"{result['author']}:{result['content'][:50] if result['content'] else ''}"
+            if content_key in seen_content:
+                continue
+            seen_content.add(content_key)
+
+            # Parse timestamp if available
+            timestamp = datetime.now(timezone.utc)
+            if result.get("fullTimestamp"):
+                try:
+                    # Discord format: "Saturday, December 27, 2025 at 8:52 PM"
+                    ts_str = result["fullTimestamp"].replace(" at ", " ")
+                    timestamp = datetime.strptime(ts_str, "%A, %B %d, %Y %I:%M %p")
+                    timestamp = timestamp.replace(tzinfo=timezone.utc)
+                except (ValueError, AttributeError):
+                    pass
+
+            messages.append(
+                DiscordMessage(
+                    id=f"search-{len(messages)}",
+                    content=result["content"],
+                    author_name=result["author"],
+                    author_id="unknown",
+                    channel_id=result.get("channel") or (in_channels[0] if in_channels else ""),
+                    timestamp=timestamp,
+                    attachments=[],
+                )
+            )
+
+        if len(messages) >= limit:
+            break
+
+        # Scroll to load more results
+        await state.page.evaluate(
+            """
+            () => {
+                // Find the search results container and scroll it
+                const results = document.querySelectorAll('[class*="searchResult"]');
+                if (results.length > 0) {
+                    const container = results[0].closest('[class*="scroller"], [class*="scroll"]');
+                    if (container) {
+                        container.scrollTop = container.scrollHeight;
+                    }
+                }
+            }
+            """
+        )
+        await state.page.wait_for_timeout(1000)
+        scroll_attempts += 1
+
+    logger.debug(f"Found {len(messages)} search results via DOM scraping")
+    return state, messages[:limit]

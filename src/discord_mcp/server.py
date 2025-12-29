@@ -11,6 +11,7 @@ from .client import (
     get_guilds,
     get_guild_channels,
     send_message as send_discord_message,
+    search_messages as search_discord_messages,
     close_client,
 )
 from .config import load_config
@@ -191,6 +192,93 @@ async def send_message(
         "chunks": len(chunks),
         "total_length": len(content),
     }
+
+
+@mcp.tool()
+async def search_messages(
+    server_id: str,
+    query: str = "",
+    in_channels: list[str] | None = None,
+    from_users: list[str] | None = None,
+    mentions_users: list[str] | None = None,
+    has_filters: list[str] | None = None,
+    before: str | None = None,
+    after: str | None = None,
+    during: str | None = None,
+    author_type: str | None = None,
+    pinned: bool | None = None,
+    max_results: int = 25,
+) -> list[dict[str, tp.Any]]:
+    """Search for messages in a Discord server. Uses DOM scraping to avoid API rate limits.
+
+    Args:
+        server_id: Discord server/guild ID
+        query: Search text content to find
+        in_channels: Channel names to search in (e.g., ["general", "memes"])
+        from_users: Usernames to filter by author (e.g., ["alice", "bob"])
+        mentions_users: Usernames to filter by mentions
+        has_filters: Content type filters - can combine multiple (image, video, link, file, embed)
+        before: Date filter YYYY-MM-DD (messages before this date)
+        after: Date filter YYYY-MM-DD (messages after this date)
+        during: Date filter YYYY-MM-DD (messages on this specific date)
+        author_type: Filter by author type (user, bot, webhook)
+        pinned: If True, only search pinned messages
+        max_results: Maximum number of results (1-100, default 25)
+    """
+    if not query.strip() and not any(
+        [
+            in_channels,
+            from_users,
+            mentions_users,
+            has_filters,
+            before,
+            after,
+            during,
+            author_type,
+            pinned,
+        ]
+    ):
+        raise ValueError("Must provide query text or at least one filter")
+    if not (1 <= max_results <= 100):
+        raise ValueError("max_results must be between 1 and 100")
+
+    valid_has = {"image", "video", "link", "file", "embed"}
+    if has_filters and not all(h in valid_has for h in has_filters):
+        raise ValueError(f"has_filters must be from: {valid_has}")
+    if author_type and author_type not in ("user", "bot", "webhook"):
+        raise ValueError("author_type must be one of: user, bot, webhook")
+
+    ctx = mcp.get_context()
+    discord_ctx = tp.cast(DiscordContext, ctx.request_context.lifespan_context)
+
+    async def operation(state):
+        return await search_discord_messages(
+            state,
+            server_id=server_id,
+            query=query,
+            in_channels=in_channels,
+            from_users=from_users,
+            mentions_users=mentions_users,
+            has_filters=has_filters,
+            before=before,
+            after=after,
+            during=during,
+            author_type=author_type,
+            pinned=pinned,
+            limit=max_results,
+        )
+
+    messages = await _execute_with_fresh_client(discord_ctx, operation)
+    return [
+        {
+            "id": m.id,
+            "content": m.content,
+            "author_name": m.author_name,
+            "timestamp": m.timestamp.isoformat(),
+            "attachments": m.attachments,
+        }
+        for m in messages
+    ]
 
 
 def main():
