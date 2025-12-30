@@ -76,6 +76,9 @@ Create `.env` file:
 DISCORD_EMAIL=your_email@example.com
 DISCORD_PASSWORD=your_password
 DISCORD_HEADLESS=true
+
+# Optional: Add extra wait time (ms) for slow connections
+DISCORD_EXTRA_WAIT_MS=0
 ```
 
 ### Run Server
@@ -130,6 +133,7 @@ uv run pytest -v tests/
 - **Login issues**: Verify credentials, use app password for 2FA
 - **Browser errors**: Run `uv run playwright install --force`
 - **Rate limits**: Reduce `max_messages`, monitor for Discord warnings (server auto-splits long messages with delays)
+- **Slow connections/timeouts**: Set `DISCORD_EXTRA_WAIT_MS=500` or higher to add extra wait time for slow systems
 - **Cookie issues**: Delete `~/.discord_mcp_cookies.json` if needed
 - **Message splitting**: Long messages (>2000 chars) automatically split into multiple messages with 0.5s delays
 

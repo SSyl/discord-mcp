@@ -37,6 +37,7 @@ class ClientState:
     email: str
     password: str
     headless: bool = True
+    extra_wait_ms: int = 0
     playwright: Playwright | None = None
     browser: Browser | None = None
     context: object | None = None  # BrowserContext
@@ -48,9 +49,11 @@ class ClientState:
 
 
 def create_client_state(
-    email: str, password: str, headless: bool = True
+    email: str, password: str, headless: bool = True, extra_wait_ms: int = 0
 ) -> ClientState:
-    return ClientState(email=email, password=password, headless=headless)
+    return ClientState(
+        email=email, password=password, headless=headless, extra_wait_ms=extra_wait_ms
+    )
 
 
 async def _ensure_browser(state: ClientState) -> ClientState:
@@ -127,7 +130,7 @@ async def _login(state: ClientState) -> ClientState:
         await state.page.wait_for_function(
             "() => !window.location.href.includes('/login')", timeout=60000
         )
-        await asyncio.sleep(1)
+        await asyncio.sleep(1 + state.extra_wait_ms / 1000)
 
         if (
             "/verify" in state.page.url
@@ -194,7 +197,7 @@ async def get_guilds(state: ClientState) -> tuple[ClientState, list[DiscordGuild
             state="visible",
             timeout=15000,
         )
-        await state.page.wait_for_timeout(1000)
+        await state.page.wait_for_timeout(1000 + state.extra_wait_ms)
 
         # Scroll guild navigation to load all guilds
         await state.page.evaluate("""
@@ -216,7 +219,7 @@ async def get_guilds(state: ClientState) -> tuple[ClientState, list[DiscordGuild
                 }
             }
         """)
-        await state.page.wait_for_timeout(500)
+        await state.page.wait_for_timeout(500 + state.extra_wait_ms)
     except Exception:
         pass
 
@@ -286,7 +289,7 @@ async def get_guild_channels(
     await state.page.goto(
         f"https://discord.com/channels/{guild_id}", wait_until="domcontentloaded"
     )
-    await state.page.wait_for_timeout(3000)
+    await state.page.wait_for_timeout(1000 + state.extra_wait_ms)
 
     # Helper function to extract channels
     def extract_channels_js() -> str:
@@ -643,18 +646,18 @@ async def search_messages(
         f"https://discord.com/channels/{server_id}",
         wait_until="domcontentloaded",
     )
-    await state.page.wait_for_timeout(2000)
+    await state.page.wait_for_timeout(1000 + state.extra_wait_ms)
 
     # Click the search box
     search_box = await state.page.query_selector('[role="combobox"]')
     if not search_box:
         raise RuntimeError("Could not find search box")
     await search_box.click()
-    await state.page.wait_for_timeout(500)
+    await state.page.wait_for_timeout(200 + state.extra_wait_ms)
 
     # Type the search query
     await state.page.keyboard.type(full_query, delay=50)
-    await state.page.wait_for_timeout(500)
+    await state.page.wait_for_timeout(200 + state.extra_wait_ms)
 
     # Submit search
     await state.page.keyboard.press("Enter")
@@ -668,7 +671,7 @@ async def search_messages(
         logger.debug("No search results found or timeout waiting for results")
         return state, []
 
-    await state.page.wait_for_timeout(1000)
+    await state.page.wait_for_timeout(500 + state.extra_wait_ms)
 
     # Navigate to requested page if not page 1
     if page > 1:

@@ -11,6 +11,7 @@ class DiscordConfig(tp.NamedTuple):
     default_guild_ids: list[str]
     max_messages_per_channel: int
     default_hours_back: int
+    extra_wait_ms: int
 
 
 def load_config() -> DiscordConfig:
@@ -33,6 +34,7 @@ def load_config() -> DiscordConfig:
 
     max_messages = int(os.getenv("MAX_MESSAGES_PER_CHANNEL", "200"))
     hours_back = int(os.getenv("DEFAULT_HOURS_BACK", "24"))
+    extra_wait_ms = int(os.getenv("DISCORD_EXTRA_WAIT_MS", "0"))
 
     return DiscordConfig(
         email=email,
@@ -41,4 +43,5 @@ def load_config() -> DiscordConfig:
         default_guild_ids=guild_ids,
         max_messages_per_channel=max_messages,
         default_hours_back=hours_back,
+        extra_wait_ms=extra_wait_ms,
     )

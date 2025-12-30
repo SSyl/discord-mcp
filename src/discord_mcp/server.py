@@ -44,7 +44,10 @@ async def _execute_with_fresh_client[T](
     """Execute Discord operation with fresh client state"""
     async with discord_ctx.client_lock:
         client_state = create_client_state(
-            discord_ctx.config.email, discord_ctx.config.password, True
+            discord_ctx.config.email,
+            discord_ctx.config.password,
+            True,
+            discord_ctx.config.extra_wait_ms,
         )
         try:
             _, result = await operation(client_state)
