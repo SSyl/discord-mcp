@@ -62,9 +62,7 @@ mcp = FastMCP("discord-mcp", lifespan=discord_lifespan)
 
 @mcp.tool(
     description="List all Discord servers you have access to",
-    annotations=ToolAnnotations(
-        title="List Discord Servers", readOnlyHint=True, destructiveHint=False
-    ),
+    annotations=ToolAnnotations(readOnlyHint=True),
 )
 async def get_servers() -> list[dict[str, str]]:
     """List all Discord servers you have access to.
@@ -81,9 +79,7 @@ async def get_servers() -> list[dict[str, str]]:
 
 @mcp.tool(
     description="List all channels in a specific Discord server",
-    annotations=ToolAnnotations(
-        title="List Server Channels", readOnlyHint=True, destructiveHint=False
-    ),
+    annotations=ToolAnnotations(readOnlyHint=True),
 )
 async def get_channels(server_id: str) -> list[dict[str, str]]:
     """List all channels in a specific Discord server.
@@ -106,9 +102,7 @@ async def get_channels(server_id: str) -> list[dict[str, str]]:
 
 @mcp.tool(
     description="Read recent messages from a specific channel",
-    annotations=ToolAnnotations(
-        title="Read Channel Messages", readOnlyHint=True, destructiveHint=False
-    ),
+    annotations=ToolAnnotations(readOnlyHint=True),
 )
 async def read_messages(
     server_id: str, channel_id: str, max_messages: int, hours_back: int = 24
@@ -152,9 +146,7 @@ async def read_messages(
 
 @mcp.tool(
     description="Send a message to a specific Discord channel. Long messages are automatically split.",
-    annotations=ToolAnnotations(
-        title="Send Message", readOnlyHint=False, destructiveHint=True
-    ),
+    annotations=ToolAnnotations(destructiveHint=True),
 )
 async def send_message(
     server_id: str, channel_id: str, content: str
@@ -250,23 +242,20 @@ async def send_message(
 
 
 @mcp.tool(
-    description="Search for messages in a Discord server with filters for channels, users, dates, and content types",
-    annotations=ToolAnnotations(
-        title="Search Messages", readOnlyHint=True, destructiveHint=False
-    ),
+    description="Search and filter messages across channels (returns matching messages only)",
+    annotations=ToolAnnotations(readOnlyHint=True),
 )
 async def search_messages(
     server_id: str,
     query: str = "",
-    in_channels: list[str] | None = None,
-    from_users: list[str] | None = None,
-    mentions_users: list[str] | None = None,
-    has_filters: list[str] | None = None,
-    before: str | None = None,
-    after: str | None = None,
-    during: str | None = None,
-    author_type: str | None = None,
-    pinned: bool | None = None,
+    in_channels: list[str] = [],
+    from_users: list[str] = [],
+    mentions_users: list[str] = [],
+    content_types: list[str] = [],
+    before: str = "",
+    after: str = "",
+    author_type: str = "",
+    pinned: bool = False,
     page: int = 1,
     max_results: int = 25,
 ) -> list[dict[str, tp.Any]]:
@@ -278,12 +267,11 @@ async def search_messages(
         in_channels: Channel names to search in (e.g., ["general", "memes"])
         from_users: Usernames to filter by author (e.g., ["alice", "bob"])
         mentions_users: Usernames to filter by mentions
-        has_filters: Content type filters - can combine multiple (image, video, link, file, embed)
+        content_types: Filter by content type - can combine multiple (image, video, link, file, embed)
         before: Date filter YYYY-MM-DD (messages before this date)
         after: Date filter YYYY-MM-DD (messages after this date)
-        during: Date filter YYYY-MM-DD (messages on this specific date)
         author_type: Filter by author type (user, bot, webhook)
-        pinned: If True, only search pinned messages
+        pinned: Only search pinned messages (default False)
         page: Page number of results (1-indexed, default 1)
         max_results: Maximum number of results per page (1-100, default 25)
     """
@@ -292,10 +280,9 @@ async def search_messages(
             in_channels,
             from_users,
             mentions_users,
-            has_filters,
+            content_types,
             before,
             after,
-            during,
             author_type,
             pinned,
         ]
@@ -306,9 +293,9 @@ async def search_messages(
     if page < 1:
         raise ValueError("page must be at least 1")
 
-    valid_has = {"image", "video", "link", "file", "embed"}
-    if has_filters and not all(h in valid_has for h in has_filters):
-        raise ValueError(f"has_filters must be from: {valid_has}")
+    valid_types = {"image", "video", "link", "file", "embed"}
+    if content_types and not all(t in valid_types for t in content_types):
+        raise ValueError(f"content_types must be from: {valid_types}")
     if author_type and author_type not in ("user", "bot", "webhook"):
         raise ValueError("author_type must be one of: user, bot, webhook")
 
@@ -323,10 +310,9 @@ async def search_messages(
             in_channels=in_channels,
             from_users=from_users,
             mentions_users=mentions_users,
-            has_filters=has_filters,
+            has_filters=content_types,
             before=before,
             after=after,
-            during=during,
             author_type=author_type,
             pinned=pinned,
             page=page,
@@ -347,10 +333,8 @@ async def search_messages(
 
 
 @mcp.tool(
-    description="Jump to a search result and get surrounding message context for conversation analysis",
-    annotations=ToolAnnotations(
-        title="Get Search Result Context", readOnlyHint=True, destructiveHint=False
-    ),
+    description="Get the conversation thread around a search result (configurable messages before/after the match)",
+    annotations=ToolAnnotations(readOnlyHint=True),
 )
 async def get_search_result_context(
     server_id: str,
@@ -358,8 +342,8 @@ async def get_search_result_context(
     result_index: int = 0,
     before_count: int = 5,
     after_count: int = 5,
-    in_channels: list[str] | None = None,
-    from_users: list[str] | None = None,
+    in_channels: list[str] = [],
+    from_users: list[str] = [],
     page: int = 1,
 ) -> dict[str, tp.Any]:
     """Jump to a search result and get surrounding message context for conversation analysis.

@@ -36,6 +36,7 @@ def real_config():
         default_guild_ids=[],
         max_messages_per_channel=50,
         default_hours_back=24,
+        extra_wait_ms=0,
     )
 
 
@@ -77,6 +78,7 @@ async def discord_client(real_config):
         email=real_config.email,
         password=real_config.password,
         headless=real_config.headless,
+        extra_wait_ms=0,
     )
 
     yield client_state

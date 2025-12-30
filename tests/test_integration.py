@@ -110,7 +110,7 @@ async def test_mcp_get_channels_tool(real_config, test_env):
 async def test_mcp_send_message_tool(real_config, test_env):
     """Test the send_message MCP tool via proper MCP client."""
     server_params = _make_server_params(real_config)
-    test_message = "hi from discord mcp integration test"
+    test_message = "hello"
 
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:

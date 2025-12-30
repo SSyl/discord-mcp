@@ -585,7 +585,6 @@ async def search_messages(
     has_filters: list[str] | None = None,
     before: str | None = None,
     after: str | None = None,
-    during: str | None = None,
     author_type: str | None = None,
     pinned: bool | None = None,
     page: int = 1,
@@ -603,7 +602,6 @@ async def search_messages(
         has_filters: Content type filters (image, video, link, file, embed)
         before: Date filter YYYY-MM-DD
         after: Date filter YYYY-MM-DD
-        during: Date filter YYYY-MM-DD (messages on this specific date)
         author_type: Filter by author type (user, bot, webhook)
         pinned: If True, only search pinned messages
         page: Page number to retrieve (1-indexed, default 1)
@@ -631,8 +629,6 @@ async def search_messages(
         parts.append(f"before: {before}")
     if after:
         parts.append(f"after: {after}")
-    if during:
-        parts.append(f"during: {during}")
     if author_type:
         parts.append(f"authorType: {author_type}")
     if pinned:
