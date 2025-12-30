@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 from .logger import logger
 from .client import (
     create_client_state,
@@ -56,9 +57,18 @@ async def _execute_with_fresh_client[T](
 mcp = FastMCP("discord-mcp", lifespan=discord_lifespan)
 
 
-@mcp.tool()
+@mcp.tool(
+    description="List all Discord servers you have access to",
+    annotations=ToolAnnotations(
+        title="List Discord Servers", readOnlyHint=True, destructiveHint=False
+    ),
+)
 async def get_servers() -> list[dict[str, str]]:
-    """List all Discord servers (guilds) you have access to"""
+    """List all Discord servers you have access to.
+
+    Returns:
+        List of server objects with id and name fields
+    """
     ctx = mcp.get_context()
     discord_ctx = tp.cast(DiscordContext, ctx.request_context.lifespan_context)
 
@@ -66,9 +76,21 @@ async def get_servers() -> list[dict[str, str]]:
     return [{"id": g.id, "name": g.name} for g in guilds]
 
 
-@mcp.tool()
+@mcp.tool(
+    description="List all channels in a specific Discord server",
+    annotations=ToolAnnotations(
+        title="List Server Channels", readOnlyHint=True, destructiveHint=False
+    ),
+)
 async def get_channels(server_id: str) -> list[dict[str, str]]:
-    """List all channels in a specific Discord server"""
+    """List all channels in a specific Discord server.
+
+    Args:
+        server_id: Discord server ID
+
+    Returns:
+        List of channel objects with id, name, and type fields
+    """
     ctx = mcp.get_context()
     discord_ctx = tp.cast(DiscordContext, ctx.request_context.lifespan_context)
 
@@ -79,11 +101,26 @@ async def get_channels(server_id: str) -> list[dict[str, str]]:
     return [{"id": c.id, "name": c.name, "type": str(c.type)} for c in channels]
 
 
-@mcp.tool()
+@mcp.tool(
+    description="Read recent messages from a specific channel",
+    annotations=ToolAnnotations(
+        title="Read Channel Messages", readOnlyHint=True, destructiveHint=False
+    ),
+)
 async def read_messages(
     server_id: str, channel_id: str, max_messages: int, hours_back: int = 24
 ) -> list[dict[str, tp.Any]]:
-    """Read recent messages from a specific channel"""
+    """Read recent messages from a specific channel.
+
+    Args:
+        server_id: Discord server ID
+        channel_id: Channel ID to read from
+        max_messages: Maximum number of messages to retrieve (1-1000)
+        hours_back: How many hours back to search (default 24, max 8760)
+
+    Returns:
+        List of message objects with id, content, author_name, timestamp, and attachments
+    """
     if not (1 <= hours_back <= 8760):
         raise ValueError("hours_back must be between 1 and 8760 (1 year)")
     if not (1 <= max_messages <= 1000):
@@ -110,11 +147,25 @@ async def read_messages(
     ]
 
 
-@mcp.tool()
+@mcp.tool(
+    description="Send a message to a specific Discord channel. Long messages are automatically split.",
+    annotations=ToolAnnotations(
+        title="Send Message", readOnlyHint=False, destructiveHint=True
+    ),
+)
 async def send_message(
     server_id: str, channel_id: str, content: str
 ) -> dict[str, tp.Any]:
-    """Send a message to a specific Discord channel. Long messages are automatically split."""
+    """Send a message to a specific Discord channel. Long messages are automatically split.
+
+    Args:
+        server_id: Discord server ID
+        channel_id: Channel ID to send message to
+        content: Message content (automatically splits if >2000 characters)
+
+    Returns:
+        Object with message_ids, status, chunks count, and total_length
+    """
     if len(content) == 0:
         raise ValueError("Message content cannot be empty")
 
@@ -195,7 +246,12 @@ async def send_message(
     }
 
 
-@mcp.tool()
+@mcp.tool(
+    description="Search for messages in a Discord server with filters for channels, users, dates, and content types",
+    annotations=ToolAnnotations(
+        title="Search Messages", readOnlyHint=True, destructiveHint=False
+    ),
+)
 async def search_messages(
     server_id: str,
     query: str = "",
@@ -211,7 +267,7 @@ async def search_messages(
     page: int = 1,
     max_results: int = 25,
 ) -> list[dict[str, tp.Any]]:
-    """Search for messages in a Discord server. Uses DOM scraping to avoid API rate limits.
+    """Search for messages in a Discord server with filters for channels, users, dates, and content types.
 
     Args:
         server_id: Discord server/guild ID
@@ -287,7 +343,12 @@ async def search_messages(
     ]
 
 
-@mcp.tool()
+@mcp.tool(
+    description="Jump to a search result and get surrounding message context for conversation analysis",
+    annotations=ToolAnnotations(
+        title="Get Search Result Context", readOnlyHint=True, destructiveHint=False
+    ),
+)
 async def get_search_result_context(
     server_id: str,
     query: str,
@@ -298,7 +359,7 @@ async def get_search_result_context(
     from_users: list[str] | None = None,
     page: int = 1,
 ) -> dict[str, tp.Any]:
-    """Jump to a search result and get surrounding message context.
+    """Jump to a search result and get surrounding message context for conversation analysis.
 
     Searches for messages, clicks "Jump" on the specified result, and extracts
     messages before and after the target message for conversation context.

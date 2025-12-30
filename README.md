@@ -6,6 +6,8 @@ A Model Context Protocol (MCP) server that lets LLMs read messages, discover cha
 
 - List Discord servers and channels you have access to
 - Read recent messages with time filtering (newest first)
+- Search messages with filters for channels, users, dates, and content types
+- Get conversation context from selected search messages
 - Send messages to Discord channels (automatically splits long messages)
 - Web scraping approach - works with any Discord server you can access as a user
 - No bot permissions or API tokens required
@@ -35,6 +37,12 @@ claude
 # Send a long message (will be split automatically)
 > send a very long message with multiple paragraphs to channel 123 in server 456
 
+# Search messages
+> search for @dave's message about a "funny meme" in the memes channel
+
+# Get context around a search result
+> find a specific message about "cats" and show the conversation around it
+
 # Monitor communities
 > summarize discussions from the last 24 hours across my Discord servers
 ```
@@ -44,6 +52,8 @@ claude
 - **`get_servers`** - List all Discord servers you have access to
 - **`get_channels(server_id)`** - List channels in a specific server
 - **`read_messages(server_id, channel_id, max_messages, hours_back?)`** - Read recent messages (newest first, max_messages required)
+- **`search_messages(server_id, query?, ...filters)`** - Search messages with filters (channels, users, dates, content types, pagination)
+- **`get_search_result_context(server_id, query, result_index?, before_count?, after_count?)`** - Jump to a search result and get surrounding messages
 - **`send_message(server_id, channel_id, content)`** - Send messages to channels (automatically splits long messages)
 
 ## Manual Setup
