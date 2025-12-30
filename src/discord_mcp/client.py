@@ -127,7 +127,7 @@ async def _login(state: ClientState) -> ClientState:
         await state.page.wait_for_function(
             "() => !window.location.href.includes('/login')", timeout=60000
         )
-        await asyncio.sleep(3)
+        await asyncio.sleep(1)
 
         if (
             "/verify" in state.page.url
@@ -194,7 +194,7 @@ async def get_guilds(state: ClientState) -> tuple[ClientState, list[DiscordGuild
             state="visible",
             timeout=15000,
         )
-        await state.page.wait_for_timeout(5000)
+        await state.page.wait_for_timeout(1000)
 
         # Scroll guild navigation to load all guilds
         await state.page.evaluate("""
@@ -216,7 +216,7 @@ async def get_guilds(state: ClientState) -> tuple[ClientState, list[DiscordGuild
                 }
             }
         """)
-        await state.page.wait_for_timeout(2000)
+        await state.page.wait_for_timeout(500)
     except Exception:
         pass
 
