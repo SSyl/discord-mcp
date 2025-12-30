@@ -646,7 +646,12 @@ async def search_messages(
         f"https://discord.com/channels/{server_id}",
         wait_until="domcontentloaded",
     )
-    await state.page.wait_for_timeout(1000 + state.extra_wait_ms)
+
+    # Wait for Discord UI to load and search box to be available
+    await state.page.wait_for_selector(
+        '[role="combobox"]', state="visible", timeout=15000
+    )
+    await state.page.wait_for_timeout(200 + state.extra_wait_ms)
 
     # Click the search box
     search_box = await state.page.query_selector('[role="combobox"]')
@@ -854,7 +859,12 @@ async def get_search_result_context(
         f"https://discord.com/channels/{server_id}",
         wait_until="domcontentloaded",
     )
-    await state.page.wait_for_timeout(2000)
+
+    # Wait for Discord UI to load and search box to be available
+    await state.page.wait_for_selector(
+        '[role="combobox"]', state="visible", timeout=15000
+    )
+    await state.page.wait_for_timeout(200 + state.extra_wait_ms)
 
     # Click search and enter query
     search_box = await state.page.query_selector('[role="combobox"]')
