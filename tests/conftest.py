@@ -2,6 +2,7 @@ import pytest
 import pytest_asyncio
 import asyncio
 import os
+from dataclasses import dataclass
 from dotenv import load_dotenv
 from src.discord_mcp.client import create_client_state, close_client
 from src.discord_mcp.config import DiscordConfig
@@ -31,10 +32,41 @@ def real_config():
     return DiscordConfig(
         email=email,
         password=password,
-        headless=True,  # Use headless for testing in CI environment
-        default_guild_ids=["780179350682599445"],
+        headless=True,
+        default_guild_ids=[],
         max_messages_per_channel=50,
         default_hours_back=24,
+    )
+
+
+@dataclass
+class TestEnv:
+    """Test environment configuration: which server/channel/query to test against."""
+
+    server_id: str
+    channel_id: str
+    search_query: str
+    search_channel: str
+
+
+@pytest.fixture
+def test_env():
+    """Provide test environment configuration from environment."""
+    server_id = os.getenv("TEST_SERVER_ID")
+    channel_id = os.getenv("TEST_CHANNEL_ID")
+    search_query = os.getenv("TEST_SEARCH_QUERY", "test")
+    search_channel = os.getenv("TEST_SEARCH_CHANNEL", "general")
+
+    if not server_id or not channel_id:
+        pytest.skip(
+            "Test environment not configured. Set TEST_SERVER_ID and TEST_CHANNEL_ID environment variables."
+        )
+
+    return TestEnv(
+        server_id=server_id,
+        channel_id=channel_id,
+        search_query=search_query,
+        search_channel=search_channel,
     )
 
 

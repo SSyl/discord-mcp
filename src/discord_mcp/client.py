@@ -515,6 +515,63 @@ async def send_message(
     return state, f"sent-{int(datetime.now().timestamp())}"
 
 
+@dc.dataclass(frozen=True)
+class MessageContext:
+    """Context around a target message."""
+
+    target_message: DiscordMessage
+    messages_before: list[DiscordMessage]
+    messages_after: list[DiscordMessage]
+    channel_name: str
+    channel_id: str
+
+
+async def _navigate_to_search_page(page, target_page: int) -> bool:
+    """Navigate to a specific search result page.
+
+    Tries in order:
+    1. Direct "Page N" button click
+    2. "..." ellipsis -> input -> Enter (for large result sets)
+    3. Sequential "Next" button clicks
+    """
+    if target_page == 1:
+        return True  # Already on page 1
+
+    # Method 1: Try direct page button
+    page_button = await page.query_selector(f'button:has-text("Page {target_page}")')
+    if page_button and await page_button.is_visible():
+        await page_button.click()
+        await page.wait_for_timeout(1000)
+        return True
+
+    # Method 2: Try ellipsis input (for large result sets)
+    ellipsis = await page.query_selector('button:has-text("...")')
+    if ellipsis and await ellipsis.is_visible():
+        await ellipsis.click()
+        await page.wait_for_timeout(500)
+
+        # Look for input field that appears
+        page_input = await page.query_selector(
+            'input[type="number"], input[type="text"]'
+        )
+        if page_input:
+            await page_input.fill(str(target_page))
+            await page_input.press("Enter")
+            await page.wait_for_timeout(1000)
+            return True
+
+    # Method 3: Sequential Next clicks
+    for _ in range(target_page - 1):
+        next_button = await page.query_selector('button:has-text("Next")')
+        if next_button and await next_button.is_visible():
+            await next_button.click()
+            await page.wait_for_timeout(800)
+        else:
+            return False  # Can't navigate further
+
+    return True
+
+
 async def search_messages(
     state: ClientState,
     server_id: str,
@@ -528,6 +585,7 @@ async def search_messages(
     during: str | None = None,
     author_type: str | None = None,
     pinned: bool | None = None,
+    page: int = 1,
     limit: int = 25,
 ) -> tuple[ClientState, list[DiscordMessage]]:
     """Search for messages using Discord's search UI via DOM scraping.
@@ -545,6 +603,7 @@ async def search_messages(
         during: Date filter YYYY-MM-DD (messages on this specific date)
         author_type: Filter by author type (user, bot, webhook)
         pinned: If True, only search pinned messages
+        page: Page number to retrieve (1-indexed, default 1)
         limit: Maximum number of results to return
     """
     state = await _login(state)
@@ -610,6 +669,13 @@ async def search_messages(
         return state, []
 
     await state.page.wait_for_timeout(1000)
+
+    # Navigate to requested page if not page 1
+    if page > 1:
+        navigated = await _navigate_to_search_page(state.page, page)
+        if not navigated:
+            logger.debug(f"Could not navigate to page {page}")
+        await state.page.wait_for_timeout(1000)
 
     # Extract search results via JavaScript
     messages = []
@@ -705,7 +771,8 @@ async def search_messages(
                     content=result["content"],
                     author_name=result["author"],
                     author_id="unknown",
-                    channel_id=result.get("channel") or (in_channels[0] if in_channels else ""),
+                    channel_id=result.get("channel")
+                    or (in_channels[0] if in_channels else ""),
                     timestamp=timestamp,
                     attachments=[],
                 )
@@ -734,3 +801,219 @@ async def search_messages(
 
     logger.debug(f"Found {len(messages)} search results via DOM scraping")
     return state, messages[:limit]
+
+
+async def get_search_result_context(
+    state: ClientState,
+    server_id: str,
+    query: str,
+    result_index: int = 0,
+    before_count: int = 5,
+    after_count: int = 5,
+    in_channels: list[str] | None = None,
+    from_users: list[str] | None = None,
+    page: int = 1,
+) -> tuple[ClientState, MessageContext | None]:
+    """Jump to a search result and get surrounding message context.
+
+    Args:
+        state: Client state with browser session
+        server_id: Discord guild/server ID
+        query: Search query to find the target message
+        result_index: Which search result to jump to (0-indexed)
+        before_count: Number of messages to get before target
+        after_count: Number of messages to get after target
+        in_channels: Optional channel filter for search
+        from_users: Optional author filter for search
+        page: Search results page number
+
+    Returns:
+        MessageContext with target message and surrounding messages, or None if not found
+    """
+    state = await _login(state)
+    if not state.page:
+        raise RuntimeError("Browser page not initialized")
+
+    # Build search query
+    parts = [query] if query else []
+    if in_channels:
+        for channel in in_channels:
+            parts.append(f"in: {channel}")
+    if from_users:
+        for user in from_users:
+            parts.append(f"from: {user}")
+
+    full_query = " ".join(parts)
+    logger.debug(f"Getting context for '{full_query}' result {result_index}")
+
+    # Navigate to server and search
+    await state.page.goto(
+        f"https://discord.com/channels/{server_id}",
+        wait_until="domcontentloaded",
+    )
+    await state.page.wait_for_timeout(2000)
+
+    # Click search and enter query
+    search_box = await state.page.query_selector('[role="combobox"]')
+    if not search_box:
+        raise RuntimeError("Could not find search box")
+    await search_box.click()
+    await state.page.wait_for_timeout(500)
+    await state.page.keyboard.type(full_query, delay=50)
+    await state.page.keyboard.press("Enter")
+
+    # Wait for results
+    try:
+        await state.page.wait_for_selector(
+            '[class*="searchResult"]', state="visible", timeout=10000
+        )
+    except Exception:
+        logger.debug("No search results found")
+        return state, None
+
+    await state.page.wait_for_timeout(1500)
+
+    # Navigate to page if needed
+    if page > 1:
+        await _navigate_to_search_page(state.page, page)
+        await state.page.wait_for_timeout(1000)
+
+    # Find search result containers (DIVs only, not wrapper SECTION or UL)
+    result_locator = state.page.locator('div[class*="searchResult"]')
+    result_count = await result_locator.count()
+    if result_index >= result_count:
+        logger.debug(
+            f"Result index {result_index} out of range (found {result_count} results)"
+        )
+        return state, None
+
+    # Click the search result directly to jump to it
+    target_result = result_locator.nth(result_index)
+    await target_result.scroll_into_view_if_needed()
+    await target_result.click(timeout=5000)
+    await state.page.wait_for_timeout(2000)
+
+    # Extract channel info from URL
+    url = state.page.url
+    # URL format: https://discord.com/channels/{server_id}/{channel_id}/{message_id}
+    url_parts = url.split("/")
+    channel_id = url_parts[-2] if len(url_parts) >= 2 else ""
+    target_message_id = url_parts[-1] if len(url_parts) >= 1 else ""
+
+    # Wait for messages to load
+    await state.page.wait_for_selector('[id^="chat-messages-"]', timeout=10000)
+    await state.page.wait_for_timeout(1000)
+
+    # Extract messages from the channel view
+    messages_data = await state.page.evaluate(
+        """
+        () => {
+            const messages = [];
+            const messageElements = document.querySelectorAll('[id^="chat-messages-"]');
+
+            messageElements.forEach((el, index) => {
+                const id = el.id.replace('chat-messages-', '');
+
+                // Get author
+                const usernameEl = el.querySelector('[class*="username"]');
+                const author = usernameEl?.textContent?.trim() || 'Unknown';
+
+                // Get timestamp
+                const timeEl = el.querySelector('time');
+                const timestamp = timeEl?.getAttribute('datetime') || '';
+
+                // Get content
+                const contentEl = el.querySelector('[class*="messageContent"], [class*="markup"]');
+                const content = contentEl?.textContent?.trim() || '';
+
+                if (content || author !== 'Unknown') {
+                    messages.push({
+                        id: id,
+                        author: author,
+                        content: content,
+                        timestamp: timestamp,
+                        index: index
+                    });
+                }
+            });
+
+            return messages;
+        }
+        """
+    )
+
+    if not messages_data:
+        logger.debug("No messages found in channel view")
+        return state, None
+
+    # Find the target message (usually highlighted or the one we jumped to)
+    # The target is typically in the middle of visible messages
+    target_idx = len(messages_data) // 2
+
+    # Try to find by message ID if available
+    for i, msg in enumerate(messages_data):
+        if target_message_id and target_message_id in msg["id"]:
+            target_idx = i
+            break
+
+    # Build message lists
+    def make_message(data: dict) -> DiscordMessage:
+        ts = datetime.now(timezone.utc)
+        if data.get("timestamp"):
+            try:
+                ts = datetime.fromisoformat(data["timestamp"].replace("Z", "+00:00"))
+            except ValueError:
+                pass
+        return DiscordMessage(
+            id=data["id"],
+            content=data["content"],
+            author_name=data["author"],
+            author_id="unknown",
+            channel_id=channel_id,
+            timestamp=ts,
+            attachments=[],
+        )
+
+    before_start = max(0, target_idx - before_count)
+    after_end = min(len(messages_data), target_idx + after_count + 1)
+
+    messages_before = [make_message(m) for m in messages_data[before_start:target_idx]]
+    target_message = make_message(messages_data[target_idx])
+    messages_after = [
+        make_message(m) for m in messages_data[target_idx + 1 : after_end]
+    ]
+
+    # Get channel name from the URL or header
+    # The channel name is often in the page title or we can parse from filter we used
+    channel_name = in_channels[0] if in_channels else ""
+    if not channel_name:
+        # Try to get from header - look for the first distinct title text
+        channel_name = await state.page.evaluate(
+            """
+            () => {
+                // Look for channel name in header area
+                const title = document.querySelector('h1[class*="title"], [class*="channelName"]');
+                if (title) {
+                    // Get just the first text node to avoid duplicates
+                    const text = title.textContent?.trim() || '';
+                    // Take first word/segment if duplicated
+                    const parts = text.split(/(?=[A-Z])/);
+                    return parts[0] || text;
+                }
+                return '';
+            }
+            """
+        )
+
+    context = MessageContext(
+        target_message=target_message,
+        messages_before=messages_before,
+        messages_after=messages_after,
+        channel_name=channel_name.strip(),
+        channel_id=channel_id,
+    )
+
+    logger.debug(
+        f"Got context: {len(messages_before)} before, target, {len(messages_after)} after"
+    )
+    return state, context

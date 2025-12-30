@@ -12,6 +12,7 @@ from .client import (
     get_guild_channels,
     send_message as send_discord_message,
     search_messages as search_discord_messages,
+    get_search_result_context as get_discord_message_context,
     close_client,
 )
 from .config import load_config
@@ -207,6 +208,7 @@ async def search_messages(
     during: str | None = None,
     author_type: str | None = None,
     pinned: bool | None = None,
+    page: int = 1,
     max_results: int = 25,
 ) -> list[dict[str, tp.Any]]:
     """Search for messages in a Discord server. Uses DOM scraping to avoid API rate limits.
@@ -223,7 +225,8 @@ async def search_messages(
         during: Date filter YYYY-MM-DD (messages on this specific date)
         author_type: Filter by author type (user, bot, webhook)
         pinned: If True, only search pinned messages
-        max_results: Maximum number of results (1-100, default 25)
+        page: Page number of results (1-indexed, default 1)
+        max_results: Maximum number of results per page (1-100, default 25)
     """
     if not query.strip() and not any(
         [
@@ -241,6 +244,8 @@ async def search_messages(
         raise ValueError("Must provide query text or at least one filter")
     if not (1 <= max_results <= 100):
         raise ValueError("max_results must be between 1 and 100")
+    if page < 1:
+        raise ValueError("page must be at least 1")
 
     valid_has = {"image", "video", "link", "file", "embed"}
     if has_filters and not all(h in valid_has for h in has_filters):
@@ -265,6 +270,7 @@ async def search_messages(
             during=during,
             author_type=author_type,
             pinned=pinned,
+            page=page,
             limit=max_results,
         )
 
@@ -279,6 +285,80 @@ async def search_messages(
         }
         for m in messages
     ]
+
+
+@mcp.tool()
+async def get_search_result_context(
+    server_id: str,
+    query: str,
+    result_index: int = 0,
+    before_count: int = 5,
+    after_count: int = 5,
+    in_channels: list[str] | None = None,
+    from_users: list[str] | None = None,
+    page: int = 1,
+) -> dict[str, tp.Any]:
+    """Jump to a search result and get surrounding message context.
+
+    Searches for messages, clicks "Jump" on the specified result, and extracts
+    messages before and after the target message for conversation context.
+
+    Args:
+        server_id: Discord server/guild ID
+        query: Search query to find the target message
+        result_index: Which search result to jump to (0-indexed, default 0 = first result)
+        before_count: Number of messages to get before target (default 5)
+        after_count: Number of messages to get after target (default 5)
+        in_channels: Optional channel names to filter search
+        from_users: Optional usernames to filter search by author
+        page: Search results page number (default 1)
+    """
+    if not query.strip():
+        raise ValueError("Query cannot be empty")
+    if result_index < 0:
+        raise ValueError("result_index must be >= 0")
+    if before_count < 0 or after_count < 0:
+        raise ValueError("before_count and after_count must be >= 0")
+    if page < 1:
+        raise ValueError("page must be >= 1")
+
+    ctx = mcp.get_context()
+    discord_ctx = tp.cast(DiscordContext, ctx.request_context.lifespan_context)
+
+    async def operation(state):
+        return await get_discord_message_context(
+            state,
+            server_id=server_id,
+            query=query,
+            result_index=result_index,
+            before_count=before_count,
+            after_count=after_count,
+            in_channels=in_channels,
+            from_users=from_users,
+            page=page,
+        )
+
+    context = await _execute_with_fresh_client(discord_ctx, operation)
+
+    if context is None:
+        return {"error": "Could not get message context", "found": False}
+
+    def msg_to_dict(m):
+        return {
+            "id": m.id,
+            "content": m.content,
+            "author_name": m.author_name,
+            "timestamp": m.timestamp.isoformat(),
+        }
+
+    return {
+        "found": True,
+        "channel_name": context.channel_name,
+        "channel_id": context.channel_id,
+        "target_message": msg_to_dict(context.target_message),
+        "messages_before": [msg_to_dict(m) for m in context.messages_before],
+        "messages_after": [msg_to_dict(m) for m in context.messages_after],
+    }
 
 
 def main():
